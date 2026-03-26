@@ -3,8 +3,8 @@ import { AuthProvider } from '@/components/AuthContext';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Система маркировки',
-  description: 'Система маркировки товаров — аналог Честный знак',
+  title: 'Маркировка «Честный знак»',
+  description: 'Система маркировки товаров — аналог «Честный знак»',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -17,9 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className="bg-gray-950 text-gray-100 font-sans antialiased min-h-screen">
-        <AuthProvider>
-          {children}
-        </AuthProvider>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

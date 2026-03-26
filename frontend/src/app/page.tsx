@@ -9,7 +9,14 @@ export default function Home() {
 
   useEffect(() => {
     if (!loading) {
-      router.replace(user ? '/dashboard' : '/auth');
+      if (!user) {
+        router.replace('/auth');
+      } else if (user.role === 'ADMIN') {
+        router.replace('/dashboard');
+      } else {
+        // USER role goes directly to verify page
+        router.replace('/verify');
+      }
     }
   }, [user, loading, router]);
 
