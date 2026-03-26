@@ -2,7 +2,6 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/AuthContext';
-import './globals.css';
 
 export default function AuthPage() {
   const [mode, setMode]       = useState<'login' | 'register'>('login');
