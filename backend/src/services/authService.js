@@ -3,9 +3,6 @@ const jwt = require('jsonwebtoken');
 const userRepository = require('../repositories/userRepository');
 
 class AuthService {
-  /**
-   * Register a new user
-   */
   async register({ email, password, role = 'USER' }) {
     // Check if email is taken
     const exists = await userRepository.emailExists(email);
@@ -23,30 +20,15 @@ class AuthService {
     return { user, token };
   }
 
-  /**
-   * Login existing user
-   */
   async login({ email, password }) {
     const user = await userRepository.findByEmail(email);
-    
-    if (!user) {
-      throw { status: 401, message: 'Неверный email или пароль.' };
-    }
-
-    const passwordValid = await bcrypt.compare(password, user.password_hash);
-    if (!passwordValid) {
-      throw { status: 401, message: 'Неверный email или пароль.' };
-    }
-
-    const token = this.generateToken(user.id);
+    if (!user) throw { status: 401, message: 'Неверный email или пароль.' };
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) throw { status: 401, message: 'Неверный email или пароль.' };
     const { password_hash, ...safeUser } = user;
-    
-    return { user: safeUser, token };
+    return { user: safeUser, token: this.generateToken(user.id) };
   }
 
-  /**
-   * Generate JWT token
-   */
   generateToken(userId) {
     return jwt.sign(
       { userId },
