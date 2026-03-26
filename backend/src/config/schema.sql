@@ -1,72 +1,72 @@
--- ============================================================
--- MARKING SYSTEM DATABASE SCHEMA
--- ============================================================
+-- Drop existing tables (safe re-run)
+drop table if exists logs     cascade;
+drop table if exists codes    cascade;
+drop table if exists products cascade;
+drop table if exists users    cascade;
 
--- Drop tables if they exist (for re-runs)
-DROP TABLE IF EXISTS logs CASCADE;
-DROP TABLE IF EXISTS codes CASCADE;
-DROP TABLE IF EXISTS products CASCADE;
-DROP TABLE IF EXISTS users CASCADE;
-
--- ============================================================
--- USERS TABLE
--- ============================================================
-CREATE TABLE users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  email VARCHAR(255) UNIQUE NOT NULL,
-  password_hash VARCHAR(255) NOT NULL,
-  role VARCHAR(10) NOT NULL DEFAULT 'USER' CHECK (role IN ('ADMIN', 'USER')),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- ── users ────────────────────────────────────────────────────
+create table users (
+  id            uuid primary key default gen_random_uuid(),
+  email         text unique not null,
+  password_hash text not null,
+  role          text not null default 'USER'
+                  check (role in ('ADMIN','USER')),
+  created_at    timestamptz default now(),
+  updated_at    timestamptz default now()
 );
+create index idx_users_email on users(email);
 
-CREATE INDEX idx_users_email ON users(email);
-
--- ============================================================
--- PRODUCTS TABLE
--- ============================================================
-CREATE TABLE products (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(255) NOT NULL,
-  category VARCHAR(100) NOT NULL,
-  description TEXT,
-  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- ── products ─────────────────────────────────────────────────
+create table products (
+  id          uuid primary key default gen_random_uuid(),
+  name        text not null,
+  category    text not null,
+  description text,
+  created_by  uuid references users(id) on delete set null,
+  created_at  timestamptz default now(),
+  updated_at  timestamptz default now()
 );
+create index idx_products_category   on products(category);
+create index idx_products_created_at on products(created_at desc);
 
-CREATE INDEX idx_products_category ON products(category);
-CREATE INDEX idx_products_created_at ON products(created_at DESC);
-
--- ============================================================
--- CODES TABLE
--- ============================================================
-CREATE TABLE codes (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  product_id UUID NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-  code VARCHAR(50) UNIQUE NOT NULL,
-  status VARCHAR(10) NOT NULL DEFAULT 'valid' CHECK (status IN ('valid', 'used', 'invalid')),
-  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
-  used_at TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- ── codes ────────────────────────────────────────────────────
+create table codes (
+  id          uuid primary key default gen_random_uuid(),
+  product_id  uuid not null references products(id) on delete cascade,
+  code        text unique not null,
+  status      text not null default 'valid'
+                check (status in ('valid','used','invalid')),
+  created_by  uuid references users(id) on delete set null,
+  used_at     timestamptz,
+  created_at  timestamptz default now()
 );
+create index idx_codes_product_id on codes(product_id);
+create index idx_codes_code       on codes(code);
+create index idx_codes_status     on codes(status);
 
-CREATE INDEX idx_codes_product_id ON codes(product_id);
-CREATE INDEX idx_codes_code ON codes(code);
-CREATE INDEX idx_codes_status ON codes(status);
-
--- ============================================================
--- LOGS TABLE
--- ============================================================
-CREATE TABLE logs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
-  action VARCHAR(100) NOT NULL,
-  details JSONB,
-  ip_address VARCHAR(45),
-  timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+-- ── logs ─────────────────────────────────────────────────────
+create table logs (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid references users(id) on delete set null,
+  action     text not null,
+  details    jsonb default '{}'::jsonb,
+  ip_address text,
+  timestamp  timestamptz default now()
 );
+create index idx_logs_user_id   on logs(user_id);
+create index idx_logs_action    on logs(action);
+create index idx_logs_timestamp on logs(timestamp desc);
 
-CREATE INDEX idx_logs_user_id ON logs(user_id);
-CREATE INDEX idx_logs_action ON logs(action);
-CREATE INDEX idx_logs_timestamp ON logs(timestamp DESC);
+-- ── auto updated_at ──────────────────────────────────────────
+create or replace function set_updated_at()
+returns trigger language plpgsql as $$
+begin new.updated_at = now(); return new; end; $$;
+
+create trigger trg_users_updated_at    before update on users    for each row execute function set_updated_at();
+create trigger trg_products_updated_at before update on products for each row execute function set_updated_at();
+
+-- ── disable RLS (server-side service-role key bypasses anyway) ─
+alter table users    disable row level security;
+alter table products disable row level security;
+alter table codes    disable row level security;
+alter table logs     disable row level security;
