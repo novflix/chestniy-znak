@@ -1,38 +1,35 @@
-const pool = require('../config/database');
+const { supabase } = require('../config/supabase');
 
 class UserRepository {
   async findByEmail(email) {
-    const result = await pool.query(
-      'SELECT * FROM users WHERE email = $1',
-      [email]
-    );
-    return result.rows[0] || null;
+    const { data, error } = await supabase
+      .from('users').select('*').eq('email', email).maybeSingle();
+    if (error) throw error;
+    return data;
   }
 
   async findById(id) {
-    const result = await pool.query(
-      'SELECT id, email, role, created_at FROM users WHERE id = $1',
-      [id]
-    );
-    return result.rows[0] || null;
+    const { data, error } = await supabase
+      .from('users').select('id,email,role,created_at').eq('id', id).maybeSingle();
+    if (error) throw error;
+    return data;
   }
 
   async create({ email, passwordHash, role = 'USER' }) {
-    const result = await pool.query(
-      `INSERT INTO users (email, password_hash, role)
-       VALUES ($1, $2, $3)
-       RETURNING id, email, role, created_at`,
-      [email, passwordHash, role]
-    );
-    return result.rows[0];
+    const { data, error } = await supabase
+      .from('users')
+      .insert({ email, password_hash: passwordHash, role })
+      .select('id,email,role,created_at')
+      .single();
+    if (error) throw error;
+    return data;
   }
 
   async emailExists(email) {
-    const result = await pool.query(
-      'SELECT id FROM users WHERE email = $1',
-      [email]
-    );
-    return result.rows.length > 0;
+    const { data, error } = await supabase
+      .from('users').select('id').eq('email', email).maybeSingle();
+    if (error) throw error;
+    return !!data;
   }
 }
 

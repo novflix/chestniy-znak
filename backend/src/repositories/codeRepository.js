@@ -1,91 +1,86 @@
-const pool = require('../config/database');
+const { supabase } = require('../config/supabase');
 
 class CodeRepository {
+  /** Single insert */
   async create({ productId, code, createdBy }) {
-    const result = await pool.query(
-      `INSERT INTO codes (product_id, code, status, created_by)
-       VALUES ($1, $2, 'valid', $3)
-       RETURNING *`,
-      [productId, code, createdBy]
-    );
-    return result.rows[0];
+    const { data, error } = await supabase
+      .from('codes')
+      .insert({ product_id: productId, code, status: 'valid', created_by: createdBy })
+      .select('*').single();
+    if (error) throw error;
+    return data;
   }
 
-  async createMany(codes) {
-    if (codes.length === 0) return [];
-
-    const placeholders = codes.map((_, i) => 
-      `($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`
-    ).join(',');
-
-    const values = codes.flatMap(c => [c.productId, c.code, c.createdBy]);
-
-    const result = await pool.query(
-      `INSERT INTO codes (product_id, code, created_by)
-       VALUES ${placeholders}
-       RETURNING *`,
-      values
-    );
-    return result.rows;
+  /**
+   * Bulk insert — all rows in ONE Supabase request.
+   * Much faster than N sequential inserts.
+   */
+  async createMany(rows) {
+    if (!rows.length) return [];
+    const { data, error } = await supabase
+      .from('codes')
+      .insert(rows.map(r => ({
+        product_id: r.productId,
+        code: r.code,
+        status: 'valid',
+        created_by: r.createdBy,
+      })))
+      .select('*');
+    if (error) throw error;
+    return data;
   }
 
+  /**
+   * O(1) lookup via unique index on code column.
+   * Joins product name for the verify response.
+   */
   async findByCode(code) {
-    const result = await pool.query(
-      `SELECT c.*, p.name AS product_name, p.category AS product_category
-       FROM codes c
-       JOIN products p ON c.product_id = p.id
-       WHERE c.code = $1`,
-      [code]
-    );
-    return result.rows[0] || null;
+    const { data, error } = await supabase
+      .from('codes')
+      .select('*, products(name, category)')
+      .eq('code', code)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    return {
+      ...data,
+      product_name:     data.products?.name     || null,
+      product_category: data.products?.category || null,
+    };
   }
 
-  async markAsUsed(code, userId) {
-    const result = await pool.query(
-      `UPDATE codes 
-       SET status = 'used', used_at = NOW()
-       WHERE code = $1 AND status = 'valid'
-       RETURNING *`,
-      [code]
-    );
-    return result.rows[0] || null;
+  async markAsUsed(code) {
+    const { data, error } = await supabase
+      .from('codes')
+      .update({ status: 'used', used_at: new Date().toISOString() })
+      .eq('code', code).eq('status', 'valid')
+      .select('*').maybeSingle();
+    if (error) throw error;
+    return data;
   }
 
-  async markAsInvalid(code) {
-    const result = await pool.query(
-      `UPDATE codes SET status = 'invalid' WHERE code = $1 RETURNING *`,
-      [code]
-    );
-    return result.rows[0] || null;
-  }
-
-  async codeExists(code) {
-    const result = await pool.query(
-      'SELECT id FROM codes WHERE code = $1',
-      [code]
-    );
-    return result.rows.length > 0;
-  }
-
-  async findByProduct(productId, { page = 1, limit = 20 } = {}) {
-    const offset = (page - 1) * limit;
-    const result = await pool.query(
-      `SELECT * FROM codes WHERE product_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
-      [productId, limit, offset]
-    );
-    return result.rows;
+  /** Bulk check which codes from a Set already exist — one round-trip */
+  async filterExisting(codeSet) {
+    const codes = [...codeSet];
+    if (!codes.length) return new Set();
+    const { data, error } = await supabase
+      .from('codes').select('code').in('code', codes);
+    if (error) throw error;
+    return new Set((data || []).map(r => r.code));
   }
 
   async getStats() {
-    const result = await pool.query(`
-      SELECT 
-        COUNT(*) AS total,
-        COUNT(*) FILTER (WHERE status = 'valid') AS valid,
-        COUNT(*) FILTER (WHERE status = 'used') AS used,
-        COUNT(*) FILTER (WHERE status = 'invalid') AS invalid
-      FROM codes
-    `);
-    return result.rows[0];
+    const { data, error } = await supabase
+      .from('codes')
+      .select('status');
+    if (error) throw error;
+    const rows = data || [];
+    return {
+      total:   String(rows.length),
+      valid:   String(rows.filter(r => r.status === 'valid').length),
+      used:    String(rows.filter(r => r.status === 'used').length),
+      invalid: String(rows.filter(r => r.status === 'invalid').length),
+    };
   }
 }
 

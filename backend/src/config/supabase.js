@@ -9,10 +9,6 @@ if (!SUPABASE_URL || !SUPABASE_SECRET_KEY) {
   process.exit(1);
 }
 
-/**
- * Server-side admin client — uses the secret key so RLS is bypassed.
- * Never expose this client to the browser.
- */
 const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
   auth: {
     autoRefreshToken: false,
@@ -20,10 +16,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SECRET_KEY, {
   },
 });
 
-/**
- * Thin helper: throws a normalised error when Supabase returns one.
- * Usage: const rows = await query(supabase.from('users').select('*'));
- */
 async function query(promise) {
   const { data, error, count } = await promise;
   if (error) {
