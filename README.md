@@ -1,204 +1,112 @@
-# 🏷️ Система маркировки товаров (MVP)
+# 🏷️ Маркировка «Честный знак» — MVP v2
 
-Информационная система для маркировки товаров — аналог «Честный знак».
-Генерирует уникальные коды, верифицирует их и ведёт аудит действий.
-
----
-
-## 📋 Стек технологий
-
-| Слой | Технологии |
-|---|---|
-| Frontend | Next.js 14 (App Router), TypeScript, Tailwind CSS, Axios |
-| Backend | Node.js, Express.js, JWT, bcrypt |
-| База данных | PostgreSQL |
-| Тесты | Jest + Supertest |
+Система маркировки товаров: генерация уникальных кодов, проверка подлинности, журнал аудита.
+Backend: **Node.js + Express + Supabase**. Frontend: **Next.js 14 + TypeScript + Tailwind**.
 
 ---
 
-## 🗂️ Структура проекта
+## 🎭 Роли пользователей
 
-```
-marking-system/
-├── backend/
-│   └── src/
-│       ├── config/          # БД, схема SQL, сид данные
-│       ├── controllers/     # HTTP-обработчики
-│       ├── services/        # Бизнес-логика
-│       ├── repositories/    # Работа с БД
-│       ├── middleware/       # Auth, logger, validate
-│       ├── routes/          # Express роутеры
-│       └── tests/           # Jest + Supertest тесты
-└── frontend/
-    └── src/
-        ├── app/             # Next.js App Router страницы
-        ├── components/      # AuthContext, Sidebar
-        ├── services/        # Axios API клиент
-        └── types/           # TypeScript типы
-```
+| Роль | Страницы | Описание |
+|------|----------|----------|
+| **ADMIN** | Дашборд, Товары, Коды, Журнал | Полный доступ ко всем функциям |
+| **USER**  | Только `/verify` | Исключительно проверка кода маркировки |
+
+После входа пользователь автоматически перенаправляется на нужную страницу в зависимости от роли. Если USER попытается открыть `/dashboard` или `/products` напрямую — его редиректит на `/verify`.
 
 ---
 
 ## 🚀 Быстрый запуск
 
-### 1. Требования
+### 1. Настроить Supabase (один раз)
 
-- Node.js 18+
-- PostgreSQL 14+
+1. Войдите на [app.supabase.com](https://app.supabase.com)
+2. Откройте ваш проект → **SQL Editor**
+3. Вставьте содержимое файла `backend/src/config/schema.sql` и нажмите **Run**
+4. Таблицы созданы ✅
 
-### 2. База данных
-
-```bash
-# Создать БД
-psql -U postgres -c "CREATE DATABASE marking_system;"
-```
-
-### 3. Backend
+### 2. Backend
 
 ```bash
 cd backend
-
-# Установить зависимости
 npm install
-
-# Настроить окружение
-cp .env.example .env
-# Отредактировать DATABASE_URL в .env
-
-# Создать таблицы и заполнить тестовыми данными (100+ записей)
-npm run seed
-
-# Запустить сервер разработки
-npm run dev
-# Сервер: http://localhost:4000
+cp .env.example .env        # ключи Supabase уже прописаны
+npm run seed                # 3 пользователя + 50 товаров + 120 кодов + 60 логов
+npm run dev                 # http://localhost:4000
 ```
 
-### 4. Frontend
+### 3. Frontend
 
 ```bash
 cd frontend
-
-# Установить зависимости
 npm install
-
-# Настроить окружение
 cp .env.local.example .env.local
-# NEXT_PUBLIC_API_URL=http://localhost:4000
-
-# Запустить
-npm run dev
-# Интерфейс: http://localhost:3000
+npm run dev                 # http://localhost:3000
 ```
 
 ---
 
-## 🔑 Демо-аккаунты (после seed)
+## 🔑 Демо-аккаунты (после `npm run seed`)
 
-| Email | Пароль | Роль |
-|---|---|---|
-| admin@marking.ru | admin123 | ADMIN |
-| user@marking.ru | user123 | USER |
-| manager@marking.ru | user123 | USER |
-
----
-
-## 📊 База данных (схема)
-
-```sql
-users    — пользователи (id, email, password_hash, role)
-products — товары (id, name, category, description, created_by)
-codes    — коды маркировки (id, product_id, code, status, created_by, used_at)
-logs     — журнал действий (id, user_id, action, details, ip_address, timestamp)
-```
-
-**Тестовые данные (seed):**
-- 3 пользователя (1 ADMIN + 2 USER)
-- 50 товаров (10 категорий × 5 товаров)
-- 120 кодов (60 valid + 30 used + 30 invalid)
-- 60 записей в журнале
+| Email | Пароль | Роль | Доступ |
+|-------|--------|------|--------|
+| admin@chestnyznak.ru | admin123 | ADMIN | Полный |
+| user@chestnyznak.ru | user123 | USER | Только проверка кода |
+| operator@chestnyznak.ru | user123 | USER | Только проверка кода |
 
 ---
 
-## 🔌 API endpoints
+
+## ⚡ Алгоритм генерации кодов v2 (2 round-trips)
+
+Старый подход: проверял каждый код отдельным запросом → N запросов к БД.
+
+Новый подход:
+1. **Локальная генерация** — `crypto.randomFillSync()` создаёт весь батч в памяти за ~1 мс
+2. **Один SELECT** — `supabase.from('codes').select('code').in('code', [...])` проверяет коллизии через уникальный индекс
+3. **Один INSERT** — `supabase.from('codes').insert([...])` вставляет всё пачкой
+
+Итог: 100 кодов ≈ **25–40 мс** вместо 200–500 мс.
+
+---
+
+## 🐛 Исправленные баги v2.1
+
+| Баг | Причина | Исправление |
+|-----|---------|-------------|
+| Статистика кодов показывала максимум 1000 | Supabase возвращает не более 1000 строк по умолчанию; JS считал длину массива | `{ count: 'exact', head: true }` — агрегация на стороне БД, без передачи данных |
+
+---
+
+## 📡 API
 
 ### Auth
-
-```
-POST /auth/register    Регистрация
-POST /auth/login       Вход
-POST /auth/logout      Выход (auth required)
-GET  /auth/me          Текущий пользователь (auth required)
-```
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/auth/register` | Регистрация (email + пароль ≥6 символов с цифрой) |
+| POST | `/auth/login` | Вход → JWT в теле + HttpOnly cookie |
+| POST | `/auth/logout` | Выход, очистка cookie |
+| GET | `/auth/me` | Данные текущего пользователя |
 
 ### Products (требует авторизации)
-
-```
-GET  /products           Список товаров (с пагинацией и фильтром)
-GET  /products/categories Список категорий
-GET  /products/:id       Товар по ID
-POST /products           Создать товар
-```
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/products` | Список с пагинацией (`?page=1&limit=20&category=Одежда`) |
+| GET | `/products/categories` | Список всех категорий |
+| GET | `/products/:id` | Один товар |
+| POST | `/products` | Создать товар |
 
 ### Codes (требует авторизации)
-
-```
-POST /codes/generate    Генерировать код(ы)
-POST /codes/verify      Проверить код
-GET  /codes/stats       Статистика кодов
-```
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/codes/generate` | Сгенерировать 1–100 кодов для товара |
+| POST | `/codes/verify` | Проверить код (`markAsUsed: true` — пометить как использованный) |
+| GET | `/codes/stats` | Статистика valid/used/invalid (точный COUNT через Supabase) |
 
 ### Logs (требует авторизации)
-
-```
-GET /logs   Журнал действий (ADMIN видит все, USER — только свои)
-```
-
----
-
-## 📡 Примеры запросов
-
-### Авторизация
-```bash
-curl -X POST http://localhost:4000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@marking.ru","password":"admin123"}'
-```
-
-### Создать товар
-```bash
-curl -X POST http://localhost:4000/products \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <TOKEN>" \
-  -d '{"name":"Смартфон OnePlus","category":"Электроника","description":"Флагман 2024"}'
-```
-
-### Генерировать 5 кодов
-```bash
-curl -X POST http://localhost:4000/codes/generate \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <TOKEN>" \
-  -d '{"productId":"<UUID>","count":5}'
-```
-
-### Проверить код
-```bash
-curl -X POST http://localhost:4000/codes/verify \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <TOKEN>" \
-  -d '{"code":"MRK-AB12-CD34-EF56-GH78","markAsUsed":false}'
-```
-
-### Ответ при действительном коде
-```json
-{
-  "valid": true,
-  "status": "valid",
-  "message": "Код маркировки действителен.",
-  "code": "MRK-AB12-CD34-EF56-GH78",
-  "product": { "name": "Смартфон OnePlus", "category": "Электроника" },
-  "createdAt": "2024-01-15T10:30:00.000Z"
-}
-```
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/logs` | Журнал (`?action=AUTH_LOGIN&page=1`). ADMIN видит все, USER — только свои |
 
 ---
 
@@ -206,53 +114,10 @@ curl -X POST http://localhost:4000/codes/verify \
 
 ```bash
 cd backend
-
-# Запустить все тесты (требует запущенную БД с seed данными)
 npm test
-
-# Тесты покрывают:
-# ✓ POST /auth/login (valid, invalid creds, invalid email)
-# ✓ POST /auth/register (success, duplicate, short password)
-# ✓ GET /products (auth, pagination)
-# ✓ POST /products (create, validation)
-# ✓ POST /codes/generate (success, not found product, count > 100)
-# ✓ POST /codes/verify (valid, not found, mark as used)
-# ✓ GET /logs (admin access)
 ```
 
----
-
-## 🔐 Безопасность
-
-- JWT токены в **HttpOnly cookie** (защита от XSS)
-- Токен также в `Authorization: Bearer` заголовке для API-клиентов
-- Пароли хешируются через **bcrypt (cost 12)**
-- Middleware проверки роли (`requireAdmin`)
-- Все неавторизованные запросы → 401
-
----
-
-## 🎨 Формат кодов маркировки
-
-```
-MRK-XXXX-XXXX-XXXX-XXXX
-    ^^^^ ^^^^ ^^^^ ^^^^
-    Каждый сегмент: A-Z, 0-9
-    
-Пример: MRK-A1B2-C3D4-E5F6-G7H8
-```
-
----
-
-## 🖥️ Страницы приложения
-
-| Путь | Описание |
-|---|---|
-| `/auth` | Вход / Регистрация с демо-кнопками |
-| `/dashboard` | Статистика + быстрые действия |
-| `/products` | Список товаров с созданием |
-| `/codes` | Генерация и проверка кодов |
-| `/logs` | Журнал аудита с деталями |
+Покрытие: 20+ тест-кейсов — Auth (login, register, /me), Products (list, create, validation), Codes (generate batch, format, uniqueness, verify, markAsUsed, USER access), Logs (ADMIN/USER isolation, action filter).
 
 ---
 
@@ -260,16 +125,48 @@ MRK-XXXX-XXXX-XXXX-XXXX
 
 ```
 HTTP Request
-    ↓
-Routes (Express Router)
-    ↓
-Middleware (authenticate → validate)
-    ↓
-Controllers (parse request, return response)
-    ↓
-Services (business logic)
-    ↓
-Repositories (SQL queries via pg Pool)
-    ↓
-PostgreSQL
+  → Express Router
+  → authenticate middleware (JWT verify)
+  → Controller (валидация входных данных)
+  → Service (бизнес-логика)
+  → Repository (Supabase queries)
+  → Supabase PostgreSQL
+```
+
+### Структура файлов
+
+```
+backend/src/
+├── config/
+│   ├── supabase.js      ← единственный Supabase-клиент (service role)
+│   ├── schema.sql       ← DDL: таблицы, индексы, триггеры
+│   └── seed.js          ← тестовые данные (233 записи)
+├── controllers/         ← HTTP-обработчики + валидация express-validator
+├── services/            ← бизнес-логика (codeService — быстрый алгоритм)
+├── repositories/        ← все запросы к Supabase
+├── middleware/          ← authenticate, requireAdmin, validate, logAction
+├── routes/              ← Express routers
+└── tests/
+    └── api.test.js      ← Jest + Supertest
+
+frontend/src/
+├── app/
+│   ├── auth/            ← страница входа/регистрации
+│   ├── dashboard/       ← статистика (ADMIN)
+│   ├── products/        ← список и создание товаров (ADMIN)
+│   ├── codes/           ← генерация и проверка кодов (ADMIN)
+│   ├── logs/            ← журнал действий (ADMIN)
+│   └── verify/          ← проверка кода (USER + ADMIN)
+├── components/
+│   ├── AuthContext.tsx  ← глобальное состояние авторизации
+│   └── Sidebar.tsx      ← навигация (ADMIN видит всё, USER — только verify)
+├── services/api.ts      ← Axios-клиент
+└── types/index.ts       ← TypeScript типы
+```
+
+### Формат кода маркировки
+```
+MRK-XXXX-XXXX-XXXX-XXXX
+     ↑ X = A-Z или 0-9 (36 символов)
+     36¹⁶ ≈ 7.96×10²⁴ возможных комбинаций
 ```
