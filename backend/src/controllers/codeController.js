@@ -9,7 +9,7 @@ const generateRules = [
     .isUUID().withMessage('Неверный формат ID товара'),
   body('count')
     .optional()
-    .isInt({ min: 1, max: 100 }).withMessage('Количество кодов: от 1 до 100'),
+    .isInt({ min: 1, max: 500 }).withMessage('Количество кодов: от 1 до 500'),
 ];
 
 const verifyRules = [

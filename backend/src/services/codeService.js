@@ -65,8 +65,8 @@ class CodeService {
     if (!(await productRepository.exists(productId))) {
       throw { status: 404, message: 'Товар не найден.' };
     }
-    if (count < 1 || count > 100) {
-      throw { status: 400, message: 'Количество кодов: от 1 до 100.' };
+    if (count < 1 || count > 500) {
+      throw { status: 400, message: 'Количество кодов: от 1 до 500.' };
     }
 
     // Step 1 — generate locally with small buffer

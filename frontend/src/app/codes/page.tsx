@@ -14,7 +14,7 @@ function GeneratePanel() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    productsApi.getAll({ limit: 100 }).then(r => setProducts(r.data.products)).catch(() => {});
+    productsApi.getAll({ limit: 500 }).then(r => setProducts(r.data.products)).catch(() => {});
   }, []);
 
   const handleGenerate = async (e: FormEvent) => {
@@ -62,10 +62,10 @@ function GeneratePanel() {
           </select>
         </div>
         <div>
-          <label className="label">Количество кодов (1–100)</label>
+          <label className="label">Количество кодов (1–500)</label>
           <input
             className="input"
-            type="number" min={1} max={100}
+            type="number" min={1} max={500}
             value={count} onChange={e => setCount(parseInt(e.target.value) || 1)}
           />
         </div>
