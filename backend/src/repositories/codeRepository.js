@@ -69,17 +69,29 @@ class CodeRepository {
     return new Set((data || []).map(r => r.code));
   }
 
+  /**
+   * FIX: считаем на стороне Supabase через { count: 'exact', head: true }.
+   * Supabase по умолчанию возвращает максимум 1000 строк — если считать
+   * длину массива в JS, статистика обрезается на 1000 даже при 10 000+ кодах.
+   * head: true = только COUNT, данные не передаются — быстро и точно.
+   */
   async getStats() {
-    const { data, error } = await supabase
-      .from('codes')
-      .select('status');
-    if (error) throw error;
-    const rows = data || [];
+    const [totalRes, validRes, usedRes, invalidRes] = await Promise.all([
+      supabase.from('codes').select('*', { count: 'exact', head: true }),
+      supabase.from('codes').select('*', { count: 'exact', head: true }).eq('status', 'valid'),
+      supabase.from('codes').select('*', { count: 'exact', head: true }).eq('status', 'used'),
+      supabase.from('codes').select('*', { count: 'exact', head: true }).eq('status', 'invalid'),
+    ]);
+
+    for (const res of [totalRes, validRes, usedRes, invalidRes]) {
+      if (res.error) throw res.error;
+    }
+
     return {
-      total:   String(rows.length),
-      valid:   String(rows.filter(r => r.status === 'valid').length),
-      used:    String(rows.filter(r => r.status === 'used').length),
-      invalid: String(rows.filter(r => r.status === 'invalid').length),
+      total:   String(totalRes.count   ?? 0),
+      valid:   String(validRes.count   ?? 0),
+      used:    String(usedRes.count    ?? 0),
+      invalid: String(invalidRes.count ?? 0),
     };
   }
 }
