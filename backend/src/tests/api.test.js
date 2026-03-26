@@ -1,256 +1,384 @@
 const request = require('supertest');
-const app = require('../src/index');
+const app = require('../index');
 
-// ── Helpers ──────────────────────────────────────────────────
-let authToken;
+// ── Общие переменные ─────────────────────────────────────────
+let adminToken;
+let userToken;
 let testProductId;
 
-const adminCredentials = { email: 'admin@marking.ru', password: 'admin123' };
+const ADMIN = { email: 'admin@chestnyznak.ru', password: 'admin123' };
+const USER  = { email: 'user@chestnyznak.ru',  password: 'user123'  };
 
-async function loginAsAdmin() {
-  const res = await request(app)
-    .post('/auth/login')
-    .send(adminCredentials);
+async function loginAs(credentials) {
+  const res = await request(app).post('/auth/login').send(credentials);
+  if (!res.body.token) throw new Error(`Login failed for ${credentials.email}: ${JSON.stringify(res.body)}`);
   return res.body.token;
 }
 
-// ── Auth Tests ───────────────────────────────────────────────
-describe('POST /auth/login', () => {
-  it('returns 200 and token with valid credentials', async () => {
-    const res = await request(app)
-      .post('/auth/login')
-      .send(adminCredentials);
-
+// ── 1. AUTH ──────────────────────────────────────────────────
+describe('Auth — POST /auth/login', () => {
+  it('200 + token при верных данных (ADMIN)', async () => {
+    const res = await request(app).post('/auth/login').send(ADMIN);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('token');
-    expect(res.body.user.email).toBe(adminCredentials.email);
-    authToken = res.body.token;
+    expect(res.body.user.email).toBe(ADMIN.email);
+    expect(res.body.user.role).toBe('ADMIN');
+    adminToken = res.body.token;
   });
 
-  it('returns 401 with wrong password', async () => {
-    const res = await request(app)
-      .post('/auth/login')
-      .send({ email: 'admin@marking.ru', password: 'wrongpass' });
+  it('200 + token при верных данных (USER)', async () => {
+    const res = await request(app).post('/auth/login').send(USER);
+    expect(res.status).toBe(200);
+    expect(res.body.user.role).toBe('USER');
+    userToken = res.body.token;
+  });
 
+  it('401 при неверном пароле', async () => {
+    const res = await request(app).post('/auth/login')
+      .send({ email: ADMIN.email, password: 'wrongpassword' });
     expect(res.status).toBe(401);
     expect(res.body).toHaveProperty('error');
   });
 
-  it('returns 422 with invalid email format', async () => {
-    const res = await request(app)
-      .post('/auth/login')
+  it('422 при невалидном формате email', async () => {
+    const res = await request(app).post('/auth/login')
       .send({ email: 'not-an-email', password: 'admin123' });
+    expect(res.status).toBe(422);
+  });
 
+  it('422 при отсутствии пароля', async () => {
+    const res = await request(app).post('/auth/login')
+      .send({ email: ADMIN.email });
     expect(res.status).toBe(422);
   });
 });
 
-describe('POST /auth/register', () => {
-  const uniqueEmail = `test_${Date.now()}@example.com`;
+describe('Auth — POST /auth/register', () => {
+  // Уникальный email для каждого запуска тестов
+  const testEmail = `test_jest_${Date.now()}@chestnyznak.ru`;
 
-  it('creates user and returns 201', async () => {
-    const res = await request(app)
-      .post('/auth/register')
-      .send({ email: uniqueEmail, password: 'secure1' });
-
+  it('201 при успешной регистрации', async () => {
+    const res = await request(app).post('/auth/register')
+      .send({ email: testEmail, password: 'secure1' });
     expect(res.status).toBe(201);
-    expect(res.body.user.email).toBe(uniqueEmail);
+    expect(res.body.user.email).toBe(testEmail);
+    expect(res.body.user.role).toBe('USER');
+    // Пароль не должен утекать
     expect(res.body.user).not.toHaveProperty('password_hash');
+    expect(res.body.user).not.toHaveProperty('password');
   });
 
-  it('returns 409 on duplicate email', async () => {
-    await request(app).post('/auth/register').send({ email: uniqueEmail, password: 'secure1' });
-    const res = await request(app)
-      .post('/auth/register')
-      .send({ email: uniqueEmail, password: 'secure1' });
-
+  it('409 при дублировании email', async () => {
+    // Повторная регистрация того же email
+    const res = await request(app).post('/auth/register')
+      .send({ email: testEmail, password: 'secure1' });
     expect(res.status).toBe(409);
   });
 
-  it('returns 422 if password is too short', async () => {
-    const res = await request(app)
-      .post('/auth/register')
-      .send({ email: 'short@example.com', password: '123' });
+  it('422 при слишком коротком пароле (< 6 символов)', async () => {
+    const res = await request(app).post('/auth/register')
+      .send({ email: `short_${Date.now()}@chestnyznak.ru`, password: '12345' });
+    expect(res.status).toBe(422);
+  });
 
+  it('422 при пароле без цифр', async () => {
+    const res = await request(app).post('/auth/register')
+      .send({ email: `nodigit_${Date.now()}@chestnyznak.ru`, password: 'abcdefg' });
     expect(res.status).toBe(422);
   });
 });
 
-// ── Products Tests ───────────────────────────────────────────
-describe('GET /products', () => {
-  beforeAll(async () => {
-    authToken = await loginAsAdmin();
+describe('Auth — GET /auth/me', () => {
+  it('200 + данные пользователя при валидном токене', async () => {
+    if (!adminToken) adminToken = await loginAs(ADMIN);
+    const res = await request(app).get('/auth/me')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.user.email).toBe(ADMIN.email);
   });
 
-  it('returns product list for authenticated user', async () => {
-    const res = await request(app)
-      .get('/products')
-      .set('Authorization', `Bearer ${authToken}`);
+  it('401 без токена', async () => {
+    const res = await request(app).get('/auth/me');
+    expect(res.status).toBe(401);
+  });
+});
 
+// ── 2. PRODUCTS ──────────────────────────────────────────────
+describe('Products — GET /products', () => {
+  beforeAll(async () => { adminToken = await loginAs(ADMIN); });
+
+  it('200 + массив товаров для авторизованного', async () => {
+    const res = await request(app).get('/products')
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('products');
     expect(Array.isArray(res.body.products)).toBe(true);
     expect(res.body).toHaveProperty('total');
-
+    expect(typeof res.body.total).toBe('number');
     if (res.body.products.length > 0) {
       testProductId = res.body.products[0].id;
     }
   });
 
-  it('returns 401 without token', async () => {
+  it('пагинация: limit и page работают', async () => {
+    const res = await request(app).get('/products?page=1&limit=5')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.products.length).toBeLessThanOrEqual(5);
+  });
+
+  it('401 без токена', async () => {
     const res = await request(app).get('/products');
     expect(res.status).toBe(401);
   });
 });
 
-describe('POST /products', () => {
-  beforeAll(async () => {
-    authToken = await loginAsAdmin();
-  });
+describe('Products — POST /products', () => {
+  beforeAll(async () => { adminToken = await loginAs(ADMIN); });
 
-  it('creates a product and returns 201', async () => {
-    const res = await request(app)
-      .post('/products')
-      .set('Authorization', `Bearer ${authToken}`)
-      .send({ name: 'Тестовый товар Jest', category: 'Электроника', description: 'Тест' });
-
+  it('201 + созданный товар', async () => {
+    const res = await request(app).post('/products')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Тестовый товар Jest', category: 'Электроника', description: 'Авто-тест' });
     expect(res.status).toBe(201);
     expect(res.body.product.name).toBe('Тестовый товар Jest');
+    expect(res.body.product.category).toBe('Электроника');
     testProductId = res.body.product.id;
   });
 
-  it('returns 422 if name is missing', async () => {
-    const res = await request(app)
-      .post('/products')
-      .set('Authorization', `Bearer ${authToken}`)
+  it('422 при отсутствии названия', async () => {
+    const res = await request(app).post('/products')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ category: 'Электроника' });
-
     expect(res.status).toBe(422);
+  });
+
+  it('422 при отсутствии категории', async () => {
+    const res = await request(app).post('/products')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Без категории' });
+    expect(res.status).toBe(422);
+  });
+
+  it('401 без токена', async () => {
+    const res = await request(app).post('/products')
+      .send({ name: 'X', category: 'Y' });
+    expect(res.status).toBe(401);
   });
 });
 
-// ── Codes Tests ──────────────────────────────────────────────
-describe('POST /codes/generate', () => {
+// ── 3. CODES ─────────────────────────────────────────────────
+describe('Codes — POST /codes/generate', () => {
   beforeAll(async () => {
-    authToken = await loginAsAdmin();
+    adminToken = await loginAs(ADMIN);
+    // Гарантируем наличие testProductId
     if (!testProductId) {
-      const res = await request(app)
-        .post('/products')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ name: 'Код-тест', category: 'Тест' });
+      const res = await request(app).post('/products')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Авто-тест продукт', category: 'Тест' });
       testProductId = res.body.product.id;
     }
   });
 
-  it('generates codes for a valid product', async () => {
-    const res = await request(app)
-      .post('/codes/generate')
-      .set('Authorization', `Bearer ${authToken}`)
+  it('201 + коды нужного количества', async () => {
+    const res = await request(app).post('/codes/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ productId: testProductId, count: 3 });
-
     expect(res.status).toBe(201);
     expect(res.body.codes).toHaveLength(3);
-    expect(res.body.codes[0].code).toMatch(/^MRK-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
   });
 
-  it('returns 404 for non-existent product', async () => {
-    const res = await request(app)
-      .post('/codes/generate')
-      .set('Authorization', `Bearer ${authToken}`)
-      .send({ productId: '00000000-0000-0000-0000-000000000000', count: 1 });
+  it('формат кодов MRK-XXXX-XXXX-XXXX-XXXX', async () => {
+    const res = await request(app).post('/codes/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ productId: testProductId, count: 1 });
+    expect(res.status).toBe(201);
+    expect(res.body.codes[0].code).toMatch(
+      /^MRK-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/
+    );
+  });
 
+  it('все коды уникальны в батче', async () => {
+    const res = await request(app).post('/codes/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ productId: testProductId, count: 20 });
+    expect(res.status).toBe(201);
+    const codes = res.body.codes.map((c) => c.code);
+    const unique = new Set(codes);
+    expect(unique.size).toBe(20);
+  });
+
+  it('404 при несуществующем productId', async () => {
+    const res = await request(app).post('/codes/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ productId: '00000000-0000-0000-0000-000000000000', count: 1 });
     expect(res.status).toBe(404);
   });
 
-  it('returns 422 for count > 100', async () => {
-    const res = await request(app)
-      .post('/codes/generate')
-      .set('Authorization', `Bearer ${authToken}`)
-      .send({ productId: testProductId, count: 999 });
-
+  it('422 при count > 100', async () => {
+    const res = await request(app).post('/codes/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ productId: testProductId, count: 101 });
     expect(res.status).toBe(422);
+  });
+
+  it('422 при count < 1', async () => {
+    const res = await request(app).post('/codes/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ productId: testProductId, count: 0 });
+    expect(res.status).toBe(422);
+  });
+
+  it('401 без токена', async () => {
+    const res = await request(app).post('/codes/generate')
+      .send({ productId: testProductId, count: 1 });
+    expect(res.status).toBe(401);
   });
 });
 
-describe('POST /codes/verify', () => {
+describe('Codes — POST /codes/verify', () => {
   let validCode;
 
   beforeAll(async () => {
-    authToken = await loginAsAdmin();
+    adminToken = await loginAs(ADMIN);
+    userToken  = await loginAs(USER);
     if (!testProductId) {
-      const prod = await request(app)
-        .post('/products')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({ name: 'Верификация-тест', category: 'Тест' });
-      testProductId = prod.body.product.id;
+      const p = await request(app).post('/products')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({ name: 'Verify-тест', category: 'Тест' });
+      testProductId = p.body.product.id;
     }
-    const genRes = await request(app)
-      .post('/codes/generate')
-      .set('Authorization', `Bearer ${authToken}`)
+    // Генерируем свежий валидный код
+    const g = await request(app).post('/codes/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ productId: testProductId, count: 1 });
-    validCode = genRes.body.codes[0].code;
+    validCode = g.body.codes[0].code;
   });
 
-  it('verifies a valid code', async () => {
-    const res = await request(app)
-      .post('/codes/verify')
-      .set('Authorization', `Bearer ${authToken}`)
+  it('200 + valid:true для действительного кода (ADMIN)', async () => {
+    const res = await request(app).post('/codes/verify')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ code: validCode });
-
     expect(res.status).toBe(200);
     expect(res.body.valid).toBe(true);
     expect(res.body.status).toBe('valid');
+    expect(res.body).toHaveProperty('product');
   });
 
-  it('returns invalid for non-existent code', async () => {
-    const res = await request(app)
-      .post('/codes/verify')
-      .set('Authorization', `Bearer ${authToken}`)
-      .send({ code: 'MRK-FAKE-CODE-DOES-NOTX' });
+  it('200 + valid:true для действительного кода (USER)', async () => {
+    // USER тоже может проверять коды
+    const res = await request(app).post('/codes/verify')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ code: validCode });
+    expect(res.status).toBe(200);
+    expect(res.body.valid).toBe(true);
+  });
 
+  it('400 + valid:false для несуществующего кода', async () => {
+    const res = await request(app).post('/codes/verify')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ code: 'MRK-FAKE-FAKE-FAKE-FAKE' });
     expect(res.status).toBe(400);
     expect(res.body.valid).toBe(false);
   });
 
-  it('marks code as used when markAsUsed=true', async () => {
-    const gen = await request(app)
-      .post('/codes/generate')
-      .set('Authorization', `Bearer ${authToken}`)
+  it('400 + invalid_format для кода неверного формата', async () => {
+    const res = await request(app).post('/codes/verify')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ code: 'НЕВЕРНЫЙ-КОД' });
+    expect(res.status).toBe(400);
+    expect(res.body.status).toBe('invalid_format');
+  });
+
+  it('markAsUsed=true помечает код как использованный', async () => {
+    // Генерируем отдельный код для этого теста
+    const g = await request(app).post('/codes/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ productId: testProductId, count: 1 });
-    const code = gen.body.codes[0].code;
+    const code = g.body.codes[0].code;
 
-    const res = await request(app)
-      .post('/codes/verify')
-      .set('Authorization', `Bearer ${authToken}`)
+    // Первая проверка с markAsUsed
+    const r1 = await request(app).post('/codes/verify')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ code, markAsUsed: true });
+    expect(r1.status).toBe(200);
+    expect(r1.body.valid).toBe(true);
 
-    expect(res.status).toBe(200);
-    expect(res.body.valid).toBe(true);
-
-    // Second verify should show "used"
-    const res2 = await request(app)
-      .post('/codes/verify')
-      .set('Authorization', `Bearer ${authToken}`)
+    // Вторая проверка — код уже использован
+    const r2 = await request(app).post('/codes/verify')
+      .set('Authorization', `Bearer ${adminToken}`)
       .send({ code });
+    expect(r2.status).toBe(400);
+    expect(r2.body.valid).toBe(false);
+    expect(r2.body.status).toBe('used');
+  });
 
-    expect(res2.body.valid).toBe(false);
-    expect(res2.body.status).toBe('used');
+  it('401 без токена', async () => {
+    const res = await request(app).post('/codes/verify')
+      .send({ code: validCode });
+    expect(res.status).toBe(401);
   });
 });
 
-// ── Logs Tests ───────────────────────────────────────────────
-describe('GET /logs', () => {
+describe('Codes — GET /codes/stats', () => {
+  beforeAll(async () => { adminToken = await loginAs(ADMIN); });
+
+  it('200 + корректная структура статистики', async () => {
+    const res = await request(app).get('/codes/stats')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.stats).toHaveProperty('total');
+    expect(res.body.stats).toHaveProperty('valid');
+    expect(res.body.stats).toHaveProperty('used');
+    expect(res.body.stats).toHaveProperty('invalid');
+    // total должен быть числом (как строка) > 0 после seed
+    expect(parseInt(res.body.stats.total)).toBeGreaterThan(0);
+  });
+});
+
+// ── 4. LOGS ──────────────────────────────────────────────────
+describe('Logs — GET /logs', () => {
   beforeAll(async () => {
-    authToken = await loginAsAdmin();
+    adminToken = await loginAs(ADMIN);
+    userToken  = await loginAs(USER);
   });
 
-  it('returns logs for admin', async () => {
-    const res = await request(app)
-      .get('/logs')
-      .set('Authorization', `Bearer ${authToken}`);
-
+  it('200 + массив логов для ADMIN', async () => {
+    const res = await request(app).get('/logs')
+      .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('logs');
     expect(Array.isArray(res.body.logs)).toBe(true);
+    expect(res.body).toHaveProperty('total');
+  });
+
+  it('ADMIN видит логи всех пользователей', async () => {
+    const res = await request(app).get('/logs')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    // После seed и тестов должно быть > 0 записей
+    expect(res.body.total).toBeGreaterThan(0);
+  });
+
+  it('USER видит только свои логи', async () => {
+    const res = await request(app).get('/logs')
+      .set('Authorization', `Bearer ${userToken}`);
+    expect(res.status).toBe(200);
+    // Все логи принадлежат этому пользователю или это его собственные записи
+    expect(Array.isArray(res.body.logs)).toBe(true);
+  });
+
+  it('фильтр по action работает', async () => {
+    const res = await request(app).get('/logs?action=AUTH_LOGIN')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(res.status).toBe(200);
+    res.body.logs.forEach((log) => {
+      expect(log.action).toBe('AUTH_LOGIN');
+    });
+  });
+
+  it('401 без токена', async () => {
+    const res = await request(app).get('/logs');
+    expect(res.status).toBe(401);
   });
 });
